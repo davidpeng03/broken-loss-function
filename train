@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Nov 23 12:11:53 2023
+
+@author: davidƒ
+"""
+
+import tensorflow.keras.callbacks as callbacks
+import tensorflow.keras as keras
+import tensorflow as tensorflow
+from keras.layers import Dropout
+import numpy as np
+import awkward
+import uproot
+import h5py
+import matplotlib.pyplot as plt
+import math
+from utils import *
+
+
+
+# this should all be moved to a json config file...
+MASKVAL = -999
+MAXTRACKS = 32
+MAXCLUSTERS = 32
+BATCHSIZE = 32
+EPOCHSIZE = 10000
+MAXEVENTS = 2000000
+# VALFACTOR = 3
+LR = 3e-5
+FNAME = "/Users/david/Downloads/jets.h5"
+
+
+jetlayers = [ 16 , 16 , 16 , 16 ]
+
+evtfeatures = [ "eventNumber" ]
+truejetfeatures = [ "jet_true_pt"]
+jetfeatures = [ "jet_pt" ]
+
+
+
+    
+jets=h5py.File("/Users/david/Downloads/jets.h5","r") # reading the file
+# Extracting dataset values
+jet_pt = jets['jet_pt'][:]
+jet_px = jets['jet_px'][:]
+jet_py = jets['jet_py'][:]
+jet_pz = jets['jet_pz'][:]
+jet_E = jets['jet_E'][:]
+jet_true_pt = jets['jet_true_pt'][:]
+jet_true_px = jets['jet_true_px'][:]
+jet_true_py = jets['jet_true_py'][:]
+jet_true_pz = jets['jet_true_pz'][:]
+jet_true_E = jets['jet_true_e'][:]
+
+#calculations
+variance = jet_true_pt**2- jet_pt**2
+sigma = np.sqrt(variance)
+
+
+
+import math
+def normpdf(x, mean, sd):
+    print(1)
+    var = sd**2
+    denom = (2*math.pi*var)**.5
+    num = tensorflow.math.exp(-(x-mean)**2/(2*var))
+    return num/denom
+
+#Data sets
+train_size = int(len(jet_pt) * 0.8)     
+test_size = jet_pt - train_size
+"""
+train_input1, test_input1 = jet_pt[:train_size], jet_pt[train_size:]
+train_input2, test_input2 = sigma[:train_size], sigma[train_size:]
+train_input = np.vstack((train_input1, train_input2)).T
+test_input = np.vstack((test_input1, test_input2)).T
+
+train_target1, test_target1 = jet_true_pt[:train_size], jet_true_pt[train_size:]
+train_target2, test_target2 = sigma[:train_size], sigma[train_size:]
+train_target = np.vstack((train_target1, train_target2)).T
+test_target = np.vstack((test_target1, test_target2)).T
+"""
+"""
+jet_pt -= 1
+jet_true_pt -= 1
+"""
+train_input, test_input = jet_pt[:train_size], jet_pt[train_size:]
+train_target, test_target = jet_true_pt[:train_size], jet_true_pt[train_size:]
+
+
+from numpy.lib.recfunctions import structured_to_unstructured
+
+def loss_function(y_true,y_pred):
+    #y_pred = tf.math.exp(y_pred)
+    #loss = - np.log(normpdf(true_pt, pred[0], pred[1]))
+
+    loss = pow((y_pred[0] - y_true), 2) / (2 * pow(tf.math.exp(y_pred[1]), 2)) + \
+           tf.math.log(tf.math.exp(y_pred[1]))
+    return loss
+
+model = \
+  buildModel \
+    ( [ len(jetfeatures) ] + jetlayers
+    , MASKVAL
+    )
+
+epoch = 0
+
+
+"""
+import keras.backend as K
+f = K.function([model.layers[0].input, K.learning_phase()],
+               [model.layers[-1].output])
+
+def predict_with_uncertainty(f, x, n_iter=10):
+    result = np.zeros((n_iter,) + x.shape)
+
+    for iter in range(n_iter):
+        result[iter] = f(x, 1)
+
+    prediction = result.mean(axis=0)
+    uncertainty = result.var(axis=0)
+    return prediction, uncertainty
+    
+"""
+
+model.summary()
+
+
+
+model.compile \
+  ( loss = loss_function
+  , optimizer = keras.optimizers.Adam(learning_rate=LR)
+  )
+  
+while 1:
+    
+
+  print("plotting")
+  regressed = model.predict(train_input.reshape(-1,1))
+# -1 lets it figure out the size for us
+#think this is wrong as the regresesd changed to just jets so might have to be [:,2] or something like that
+  
+#[:] means takes all the rows
+#[:4] means takes the first 4 colomns
+
+  print("epoch %03d" % epoch)
+  model.fit \
+    ( train_input
+    , train_target
+    , batch_size=BATCHSIZE
+    , epochs=1
+    , steps_per_epoch=EPOCHSIZE
+    , validation_data=(test_input, test_target)
+    # , validation_data=(valinputs, {"classification" : valclasstargets, "regression" : valkintargets })
+    # , callbacks=[callbacks.ReduceLROnPlateau(verbose=1)]
+    )
+
+
+#if (epoch + 1) % 1 == 0:
+  #plotting
+  #returning to 1 + x
+  """
+  regressed += 1
+  train_target += 1
+  """
+  #scatter plot
+  plt.figure()
+  plt.scatter(train_target, regressed, c='orange', marker='x', s=5)
+  plt.plot([min(train_target), max(train_target)], [min(train_target), max(train_target)], '--', color='blue', label='Line of Direct Proportionality')
+  plt.title('Model Predictions vs Actual Values')
+  plt.xlabel('Actual Transverse Momentum (GeV)')
+  plt.ylabel('Predicted Transverse Momentum (GeV)')
+  plt.legend()
+  plt.savefig('predictions_vs_actual_values_epoch_{}.png'.format(epoch + 1))
+  plt.show()
+  
+  
+  #1d histogram
+  
+  
+  train_target2d= train_target[:, np.newaxis]
+  r = regressed/train_target2d
+  
+  plt.figure()
+  plt.hist(r, 200,  alpha=0.7)
+  plt.xlabel("r")
+  plt.ylabel("probability density")
+  plt.grid(True)
+
+  plt.title("r distribution")
+  plt.show
+  
+
+  #2d hist for mean r
+  """
+
+  plt.scatter(train_target,r)
+  plt.title("R vs pt scatter")
+  plt.xlabel("pt")
+  plt.ylabel("R")
+  plt.grid(True)
+  plt.show
+  """
+  
+  cuttings = [500,1000,1500,2000,2500,3000,3500,4000,4500,5000]
+  cut_parameter_list = []
+  firstcut = train_input<cuttings[0]
+  test = r[firstcut]
+  cut_parameter_list.append(r[firstcut])
+      
+  for i in range(len(cuttings)-1):
+          upper_cut = train_input>cuttings[i]
+          lower_cut = train_input<cuttings[i+1]
+          full_cut = upper_cut*lower_cut
+          cut_parameter_list.append(r[full_cut])
+  #finalcut = regressed>cuttings[len(cuttings)-1]
+  #cut_parameter_list.append(r[finalcut])
+  #cuz using midpoints of values cant have final cut to infinity
+  
+  # should be the seperated bins of r
+  
+  cut_parameter_list = np.array(cut_parameter_list)
+  cutmeanvalue = []
+  cutsigmavalue = []
+  for i in range(len(cut_parameter_list)):
+      total = 0
+      totalamount = 0
+      squaredmeanvaluediffsum = 0
+      for j in range(len(cut_parameter_list[i])):
+          totalamount += cut_parameter_list[i][j]
+          total += 1
+      mean = totalamount/total
+      for j in range(len(cut_parameter_list[i])):
+          squaredmeanvaluediffsum += (cut_parameter_list[i][j] - mean)**2
+      sigma = math.sqrt(squaredmeanvaluediffsum/total)
+      cutmeanvalue.append(mean)
+      cutsigmavalue.append(sigma)
+
+  midpoints = [250,750,1250,1750,2250,2750,3250,3750,4250,4750]
+  plt.figure()
+  plt.errorbar(midpoints, cutmeanvalue, xerr = 250, alpha=0.7)
+  plt.title("mean r distribution")
+  plt.xlabel("pt")
+  plt.ylabel("<r>")
+  plt.grid(True)
+  plt.show
+  
+  plt.figure()
+  plt.errorbar(midpoints, cutsigmavalue, xerr = 250, alpha=0.7)
+  plt.title("mean sigma distribution")
+  plt.xlabel("pt")
+  plt.ylabel("sigma_r")
+  plt.grid(True)
+  plt.show
+  plt.figure
+  
+  epoch += 1
+
+#  model.save("figs/model.k")
